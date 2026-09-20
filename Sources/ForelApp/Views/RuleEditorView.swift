@@ -16,6 +16,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import ForelCore
 #if canImport(Photos)
 import Photos
@@ -25,6 +26,8 @@ struct RuleEditorView: View {
     @State private var rule: Rule
     @State private var showValidationErrors = false
     @State private var errorDismissTask: Task<Void, Never>?
+    @State private var draggedActionId: String?
+    @State private var actionInsertionIndex: Int?
     @EnvironmentObject private var model: AppModel
     private let preferredHeight: CGFloat
     let onSave: (Rule) -> Void
@@ -91,7 +94,12 @@ struct RuleEditorView: View {
                     }
 
                     HStack {
-                        SectionLabel(title: "Actions")
+                        VStack(alignment: .leading, spacing: 2) {
+                            SectionLabel(title: "Actions")
+                            Text("Run from top to bottom")
+                                .font(.system(size: 11))
+                                .foregroundStyle(ForelTheme.secondaryText)
+                        }
                         Spacer()
                         Button {
                             rule.actions.append(Action(ruleId: rule.id, kind: .moveToFolder, params: .object(["destination": .string("")]), position: Int64(rule.actions.count)))
@@ -105,13 +113,41 @@ struct RuleEditorView: View {
                             if rule.actions.isEmpty {
                                 placeholder("No actions yet — add at least one to make this rule do something.")
                             }
-                            ForEach($rule.actions, id: \.id) { $action in
-                                ActionRow(action: $action) {
+                            ForEach(Array(rule.actions.enumerated()), id: \.element.id) { index, action in
+                                actionDropTarget(index)
+                                ActionRow(
+                                    action: Binding(
+                                        get: { rule.actions[index] },
+                                        set: { rule.actions[index] = $0 }
+                                    ),
+                                    order: index + 1,
+                                    canMoveUp: index > 0,
+                                    canMoveDown: index < rule.actions.count - 1,
+                                    onMoveUp: { moveAction(at: index, by: -1) },
+                                    onMoveDown: { moveAction(at: index, by: 1) },
+                                    dragProvider: {
+                                        draggedActionId = action.id
+                                        return NSItemProvider(object: action.id as NSString)
+                                    }
+                                ) {
                                     rule.actions.removeAll { $0.id == action.id }
+                                    normalizeActionPositions()
                                 }
+                                .opacity(draggedActionId == action.id ? 0.55 : 1)
+                                .onDrop(
+                                    of: [.plainText],
+                                    delegate: ActionInsertionDropDelegate(
+                                        insertionIndex: index,
+                                        draggedActionId: $draggedActionId,
+                                        activeInsertionIndex: $actionInsertionIndex,
+                                        move: moveAction(id:toInsertionIndex:)
+                                    )
+                                )
                             }
+                            if !rule.actions.isEmpty { actionDropTarget(rule.actions.count) }
                         }
                         .padding(18)
+                        .animation(.easeInOut(duration: 0.12), value: actionInsertionIndex)
                     }
                 }
             }
@@ -120,7 +156,9 @@ struct RuleEditorView: View {
             Divider().overlay(ForelTheme.divider)
 
             HStack {
-                Toggle("Enabled", isOn: $rule.enabled)
+                Toggle(isOn: $rule.enabled) {
+                    Text(rule.enabled ? "Enabled" : "Disabled")
+                }
                     .toggleStyle(.switch)
                     .tint(ForelTheme.accent)
                     .font(.system(size: 12))
@@ -167,6 +205,51 @@ struct RuleEditorView: View {
 
     private var hasValidationErrors: Bool {
         !validationMessages.isEmpty
+    }
+
+    private func moveAction(at index: Int, by offset: Int) {
+        let destination = index + offset
+        guard rule.actions.indices.contains(index), rule.actions.indices.contains(destination) else { return }
+        rule.actions.swapAt(index, destination)
+        normalizeActionPositions()
+    }
+
+    private func moveAction(id: String, toInsertionIndex insertionIndex: Int) {
+        guard let sourceIndex = rule.actions.firstIndex(where: { $0.id == id }) else { return }
+        let action = rule.actions.remove(at: sourceIndex)
+        let targetIndex = sourceIndex < insertionIndex ? insertionIndex - 1 : insertionIndex
+        rule.actions.insert(action, at: max(0, min(targetIndex, rule.actions.count)))
+        normalizeActionPositions()
+    }
+
+    private func normalizeActionPositions() {
+        for index in rule.actions.indices {
+            rule.actions[index].position = Int64(index)
+        }
+    }
+
+    private func actionDropTarget(_ index: Int) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.clear)
+                .frame(height: 10)
+            if actionInsertionIndex == index, draggedActionId != nil {
+                Capsule()
+                    .fill(ForelTheme.accent)
+                    .frame(height: 2)
+                    .shadow(color: ForelTheme.accent.opacity(0.35), radius: 2, y: 1)
+            }
+        }
+        .contentShape(Rectangle())
+        .onDrop(
+            of: [.plainText],
+            delegate: ActionInsertionDropDelegate(
+                insertionIndex: index,
+                draggedActionId: $draggedActionId,
+                activeInsertionIndex: $actionInsertionIndex,
+                move: moveAction(id:toInsertionIndex:)
+            )
+        )
     }
 
     private func placeholder(_ text: String) -> some View {
@@ -795,11 +878,50 @@ private struct KindValuePicker: View {
 
 private struct ActionRow: View {
     @Binding var action: Action
+    let order: Int
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+    let dragProvider: () -> NSItemProvider
     let onDelete: () -> Void
     @State private var showingOptions = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
+            VStack(spacing: 2) {
+                Text("\(order)")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(ForelTheme.accent)
+                    .frame(width: 18, height: 18)
+                    .background(Circle().fill(ForelTheme.accent.opacity(0.14)))
+                HStack(spacing: 0) {
+                    Button(action: onMoveUp) {
+                        Image(systemName: "chevron.up")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canMoveUp)
+                    .help("Move action earlier")
+                    Button(action: onMoveDown) {
+                        Image(systemName: "chevron.down")
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canMoveDown)
+                    .help("Move action later")
+                }
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(ForelTheme.secondaryText)
+            }
+            .frame(width: 24)
+
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(ForelTheme.secondaryText.opacity(0.75))
+                .frame(width: 16)
+                .contentShape(Rectangle())
+                .onDrag(dragProvider)
+                .help("Drag to reorder")
+
             ActionKindMenu(selection: kindBinding)
             .frame(minWidth: 160, alignment: .leading)
 

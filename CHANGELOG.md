@@ -5,6 +5,9 @@ All notable changes to Forel are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Changed
+- Rule actions now show their execution order and can be reordered with move controls or drag and drop.
+
 ### Fixed
 - About Forel now displays the app name, version, build number, copyright, and repository link.
 - Automatic rules now keep processing simultaneous file arrivals when an earlier file takes time to move to another disk or network folder.
