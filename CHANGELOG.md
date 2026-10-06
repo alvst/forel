@@ -3,6 +3,11 @@
 All notable changes to Forel are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- Settings → About now shows the version, build, copyright, and repository link, matching the About Forel window.
+
 ## [1.0.9] - 2026-10-02
 
 ### Fixed
