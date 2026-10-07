@@ -45,13 +45,10 @@ struct ForelMacApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About Forel") {
-                    let info = Bundle.main.infoDictionary
-                    let version = info?["CFBundleShortVersionString"] as? String ?? "Development"
-                    let build = info?["CFBundleVersion"] as? String ?? "Development"
                     var options: [NSApplication.AboutPanelOptionKey: Any] = [
-                        .applicationName: "Forel",
-                        .applicationVersion: version,
-                        .version: "Build \(build)",
+                        .applicationName: AppInfo.name,
+                        .applicationVersion: AppInfo.version,
+                        .version: "Build \(AppInfo.build)",
                         .credits: Self.aboutCredits,
                     ]
 
@@ -80,7 +77,7 @@ struct ForelMacApp: App {
     private static var aboutCredits: NSAttributedString {
         let credits = NSMutableAttributedString(
             string: "\nGitHub Repository",
-            attributes: [.link: URL(string: "https://github.com/lab421/forel")!]
+            attributes: [.link: AppInfo.repositoryURL]
         )
 
         let paragraphStyle = NSMutableParagraphStyle()

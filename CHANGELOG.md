@@ -6,7 +6,19 @@ All notable changes to Forel are documented here. Format loosely follows
 ## [Unreleased]
 
 ### Changed
+
+### Added
+- The menu bar quick panel now shows recent activity across all folders, showing the 10 latest actions first and loading more as you scroll.
+
+### Changed
+- The menu bar quick panel no longer shows the Last 30 Days success and failure counters, and its folder, rule, and history counts now appear in a simpler Overview row.
 - Rule actions now show their execution order and can be reordered with move controls or drag and drop.
+
+### Fixed
+- The menu bar quick panel now counts the rules of all folders instead of only the folder selected in the main window.
+- Settings → About now shows the version, build, copyright, and repository link, matching the About Forel window.
+
+## [1.0.9] - 2026-10-02
 
 ### Fixed
 - About Forel now displays the app name, version, build number, copyright, and repository link.
