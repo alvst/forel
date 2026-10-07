@@ -66,4 +66,25 @@ import Testing
         list.normalizeActionPositions()
         #expect(list.map(\.position) == [0, 1])
     }
+
+    @Test func droppingOnARowInsertsAfterItWhenDraggingDownwardsAndBeforeWhenUpwards() {
+        var list = actions()
+        let first = list[0].id
+        let last = list[2].id
+
+        // First action dropped on the row right below it: swap, not a no-op.
+        let downwards = list.dropInsertionIndex(onRowAt: 1, dragging: first)
+        list.moveAction(id: first, toInsertionIndex: downwards)
+        #expect(tags(list) == ["B", "A", "C"])
+
+        // Last action dropped on the first row: lands before it.
+        let upwards = list.dropInsertionIndex(onRowAt: 0, dragging: last)
+        list.moveAction(id: last, toInsertionIndex: upwards)
+        #expect(tags(list) == ["C", "B", "A"])
+    }
+
+    @Test func dropInsertionIndexFallsBackToTheRowWhenNothingIsDragged() {
+        #expect(actions().dropInsertionIndex(onRowAt: 2, dragging: nil) == 2)
+        #expect(actions().dropInsertionIndex(onRowAt: 2, dragging: "unknown") == 2)
+    }
 }

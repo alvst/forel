@@ -127,7 +127,13 @@ struct RuleEditorView: View {
                                     onMoveDown: { moveAction(at: index, by: 1) },
                                     dragProvider: {
                                         draggedActionId = action.id
-                                        return NSItemProvider(object: action.id as NSString)
+                                        watchForDragEnd(of: action.id)
+                                        let provider = NSItemProvider()
+                                        provider.registerDataRepresentation(forTypeIdentifier: UTType.forelActionID.identifier, visibility: .ownProcess) { completion in
+                                            completion(Data(action.id.utf8), nil)
+                                            return nil
+                                        }
+                                        return provider
                                     }
                                 ) {
                                     rule.actions.removeAll { $0.id == action.id }
@@ -135,9 +141,9 @@ struct RuleEditorView: View {
                                 }
                                 .opacity(draggedActionId == action.id ? 0.55 : 1)
                                 .onDrop(
-                                    of: [.plainText],
+                                    of: [.forelActionID],
                                     delegate: ActionInsertionDropDelegate(
-                                        insertionIndex: index,
+                                        insertionIndex: rule.actions.dropInsertionIndex(onRowAt: index, dragging: draggedActionId),
                                         draggedActionId: $draggedActionId,
                                         activeInsertionIndex: $actionInsertionIndex,
                                         move: moveAction(id:toInsertionIndex:)
@@ -219,6 +225,25 @@ struct RuleEditorView: View {
         rule.actions.moveAction(id: id, toInsertionIndex: insertionIndex)
     }
 
+    /// `onDrag` has no end callback, so a drag that is cancelled (Esc, released
+    /// outside any drop target) would leave the row dimmed and the drop
+    /// delegates believing a local reorder is still in progress. Once the
+    /// mouse button is up, clear that state — after a short grace period so a
+    /// real drop, delivered right after the release, still finds it.
+    private func watchForDragEnd(of actionId: String) {
+        Task { @MainActor in
+            while draggedActionId == actionId {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard draggedActionId == actionId, NSEvent.pressedMouseButtons & 1 == 0 else { continue }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                if draggedActionId == actionId {
+                    draggedActionId = nil
+                    actionInsertionIndex = nil
+                }
+            }
+        }
+    }
+
     private func actionDropTarget(_ index: Int) -> some View {
         ZStack {
             Rectangle()
@@ -233,7 +258,7 @@ struct RuleEditorView: View {
         }
         .contentShape(Rectangle())
         .onDrop(
-            of: [.plainText],
+            of: [.forelActionID],
             delegate: ActionInsertionDropDelegate(
                 insertionIndex: index,
                 draggedActionId: $draggedActionId,

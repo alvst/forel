@@ -44,4 +44,15 @@ public extension Array where Element == Action {
         insert(action, at: Swift.max(0, Swift.min(targetIndex, count)))
         normalizeActionPositions()
     }
+
+    /// Where a drop on the body of the row at `rowIndex` inserts the action
+    /// being dragged: before that row when dragging upwards, after it when
+    /// dragging downwards — so dropping on the row right below swaps them
+    /// instead of being a no-op.
+    func dropInsertionIndex(onRowAt rowIndex: Int, dragging id: String?) -> Int {
+        guard let id, let sourceIndex = firstIndex(where: { $0.id == id }), sourceIndex < rowIndex else {
+            return rowIndex
+        }
+        return rowIndex + 1
+    }
 }
