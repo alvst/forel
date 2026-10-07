@@ -109,7 +109,7 @@ struct RuleEditorView: View {
                         .buttonStyle(IconButtonStyle())
                     }
                     GlassCard {
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 0) {
                             if rule.actions.isEmpty {
                                 placeholder("No actions yet — add at least one to make this rule do something.")
                             }
@@ -131,7 +131,7 @@ struct RuleEditorView: View {
                                     }
                                 ) {
                                     rule.actions.removeAll { $0.id == action.id }
-                                    normalizeActionPositions()
+                                    rule.actions.normalizeActionPositions()
                                 }
                                 .opacity(draggedActionId == action.id ? 0.55 : 1)
                                 .onDrop(
@@ -208,31 +208,22 @@ struct RuleEditorView: View {
     }
 
     private func moveAction(at index: Int, by offset: Int) {
-        let destination = index + offset
-        guard rule.actions.indices.contains(index), rule.actions.indices.contains(destination) else { return }
-        rule.actions.swapAt(index, destination)
-        normalizeActionPositions()
+        // A springy settle makes the two swapped rows read as moving past
+        // each other instead of snapping.
+        withAnimation(.spring(response: 0.38, dampingFraction: 0.68)) {
+            rule.actions.moveAction(at: index, by: offset)
+        }
     }
 
     private func moveAction(id: String, toInsertionIndex insertionIndex: Int) {
-        guard let sourceIndex = rule.actions.firstIndex(where: { $0.id == id }) else { return }
-        let action = rule.actions.remove(at: sourceIndex)
-        let targetIndex = sourceIndex < insertionIndex ? insertionIndex - 1 : insertionIndex
-        rule.actions.insert(action, at: max(0, min(targetIndex, rule.actions.count)))
-        normalizeActionPositions()
-    }
-
-    private func normalizeActionPositions() {
-        for index in rule.actions.indices {
-            rule.actions[index].position = Int64(index)
-        }
+        rule.actions.moveAction(id: id, toInsertionIndex: insertionIndex)
     }
 
     private func actionDropTarget(_ index: Int) -> some View {
         ZStack {
             Rectangle()
                 .fill(Color.clear)
-                .frame(height: 10)
+                .frame(height: 8)
             if actionInsertionIndex == index, draggedActionId != nil {
                 Capsule()
                     .fill(ForelTheme.accent)
@@ -897,13 +888,13 @@ private struct ActionRow: View {
                     .background(Circle().fill(ForelTheme.accent.opacity(0.14)))
                 HStack(spacing: 0) {
                     Button(action: onMoveUp) {
-                        Image(systemName: "chevron.up")
+                        chevronLabel("chevron.up")
                     }
                     .buttonStyle(.plain)
                     .disabled(!canMoveUp)
                     .help("Move action earlier")
                     Button(action: onMoveDown) {
-                        Image(systemName: "chevron.down")
+                        chevronLabel("chevron.down")
                     }
                     .buttonStyle(.plain)
                     .disabled(!canMoveDown)
@@ -912,7 +903,7 @@ private struct ActionRow: View {
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(ForelTheme.secondaryText)
             }
-            .frame(width: 24)
+            .frame(width: 40)
 
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 11, weight: .semibold))
@@ -1017,6 +1008,14 @@ private struct ActionRow: View {
                 .foregroundStyle(ForelTheme.secondaryText)
                 .frame(minHeight: 32, alignment: .center)
         }
+    }
+
+    /// The icon sits at the bottom of a larger transparent frame, so the gap
+    /// above it is part of the click target and a near miss still registers.
+    private func chevronLabel(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .frame(width: 20, height: 18, alignment: .bottom)
+            .contentShape(Rectangle())
     }
 
     private var kindBinding: Binding<ActionKind> {
