@@ -201,7 +201,10 @@ struct RuleListView: View {
     private func exportRules() {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "forelrules") ?? .json]
-        panel.nameFieldStringValue = "Forel Rules.forelrules"
+        // Rules are exported per watched folder; naming the file after it keeps
+        // exports of different folders from all proposing the same filename.
+        let folderName = selectedFolder.map { ($0.path as NSString).lastPathComponent } ?? ""
+        panel.nameFieldStringValue = folderName.isEmpty ? "Forel Rules.forelrules" : "Forel Rules - \(folderName).forelrules"
         panel.prompt = "Export"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         model.exportRules(to: url)
