@@ -79,6 +79,31 @@ import Foundation
         #expect(RuleEngine.walkEntries(root: dir.path, maxDepth: 0).map(\.path) == [finished])
     }
 
+    @Test func customFolderIconFileIsIgnoredByRunPreviewAndFolderWalk() throws {
+        // "Icon\r" has no extension, so a "Kind is Document" rule would
+        // otherwise move it and strip the folder of its custom icon.
+        let dir = TempDir()
+        let icon = dir.file("Icon\r", contents: "")
+        let document = dir.file("notes.docx", contents: "done")
+        let destination = dir.dir("Documents")
+        let rule = makeRule(
+            name: "documents",
+            conditions: [makeCondition(.kind, .is, "document")],
+            actions: [makeAction(.moveToFolder, .object(["destination": .string(destination)]))]
+        )
+
+        #expect(RuleEngine.previewFile(path: icon, depth: 0, rules: [rule]) == nil)
+        let walked = RuleEngine.walkEntries(root: dir.path, maxDepth: 0).map(\.path)
+        #expect(!walked.contains(icon))
+        #expect(walked.contains(document))
+
+        let (matched, history) = RuleEngine.run(path: icon, depth: 0, rules: [rule], batchId: "batch")
+
+        #expect(matched.isEmpty)
+        #expect(history.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: icon))
+    }
+
     @Test func conditionOrderDoesNotChangeAllOrAnyMatching() throws {
         // `ruleMatches` evaluates cheap conditions before `contents` and
         // short-circuits. Reordering must not change the boolean outcome, so a
@@ -814,5 +839,49 @@ import Foundation
         #expect(RuleEngine.pathDepth(root: "/Users/x/Inbox", path: "/Users/x/Inbox/file.txt") == 0)
         #expect(RuleEngine.pathDepth(root: "/Users/x/Inbox", path: "/Users/x/Inbox/Sub/file.txt") == 1)
         #expect(RuleEngine.pathDepth(root: "/Users/x/Inbox", path: "/Users/x/Other/file.txt") == nil)
+    }
+
+    @Test(arguments: [ActionKind.moveToFolder, .copyToFolder])
+    func unreachableDestinationIsFlaggedInPreviewAndFailsWhenRun(kind: ActionKind) throws {
+        let dir = TempDir()
+        let file = dir.file("report.pdf", contents: "done")
+        // Like a NAS share that isn't mounted: the folder is missing and
+        // nothing can be created under /Volumes.
+        let destination = "/Volumes/ForelMissingShare-\(UUID().uuidString)/Inbox"
+        let rule = makeRule(
+            name: "to nas",
+            conditions: [makeCondition(.extension_, .is, "pdf")],
+            actions: [makeAction(kind, .object(["destination": .string(destination)]))]
+        )
+
+        let preview = try #require(RuleEngine.previewFile(path: file, depth: 0, rules: [rule]))
+        let action = try #require(preview.rules.first?.actions.first)
+        #expect(action.status == .wouldRun)
+        #expect(action.warning != nil)
+
+        // The warning only informs: the run still attempts the action, and
+        // records the real failure without touching the file.
+        let (_, history) = RuleEngine.run(path: file, depth: 0, rules: [rule], batchId: "batch")
+        #expect(history.map(\.status) == [.failed])
+        #expect(history.first?.message?.isEmpty == false)
+        #expect(FileManager.default.fileExists(atPath: file))
+        #expect(RunSummary.message(for: history) == "Run complete — 1 action failed")
+    }
+
+    @Test func reachableDestinationHasNoWarningEvenBeforeItExists() throws {
+        let dir = TempDir()
+        let file = dir.file("report.pdf", contents: "done")
+        let existing = dir.dir("Documents")
+        let notCreatedYet = (dir.path as NSString).appendingPathComponent("Archive/2026/10")
+
+        for destination in [existing, notCreatedYet] {
+            let rule = makeRule(
+                name: "sort",
+                conditions: [makeCondition(.extension_, .is, "pdf")],
+                actions: [makeAction(.moveToFolder, .object(["destination": .string(destination)]))]
+            )
+            let preview = try #require(RuleEngine.previewFile(path: file, depth: 0, rules: [rule]))
+            #expect(preview.rules.first?.actions.first?.warning == nil)
+        }
     }
 }

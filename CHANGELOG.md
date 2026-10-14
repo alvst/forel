@@ -7,6 +7,26 @@ All notable changes to Forel are documented here. Format loosely follows
 
 ### Added
 - Rules can now run AppleScript, JavaScript, and Automator workflows, pause between actions, and display notifications.
+- Right-clicking a watched folder in the sidebar now offers Show in Finder.
+- Activity can now be opened from the bottom of the sidebar, next to Settings.
+- When Run Now has failed actions, its result now stays on screen with a Show in Activity link to see what went wrong.
+- Added a getting-started example for lowercasing filenames and replacing spaces with underscores, with guidance on how scripts receive files.
+- The menu bar quick panel now shows recent activity across all folders, showing the 10 latest actions first and loading more as you scroll.
+
+### Changed
+- The menu bar quick panel no longer shows the Last 30 Days success and failure counters, and its folder, rule, and history counts now appear in a simpler Overview row.
+- The menu bar quick panel now counts the rules of all folders instead of only the folder selected in the main window.
+- Settings → About now shows the version, build, copyright, and repository link, matching the About Forel window.
+
+### Fixed
+- The menu bar icon now appears when Forel starts at login, without having to reopen the app.
+- Run Now no longer reports failed actions as applied: its result now counts applied, failed, skipped, and pending actions separately.
+- Dry Run now warns when a Move or Copy destination can't be reached or written to, such as a disconnected disk or network share.
+- Rules with a Size condition no longer crash when the entered size is an extremely large number.
+- Rules no longer move or change macOS system files such as a folder's custom icon file, so folders keep their custom icons. iCloud placeholders, volume system folders, and Windows `Thumbs.db` / `desktop.ini` files are ignored too.
+- Automatic rules now wait until an arriving file or folder has finished being written before acting on it, so AirDrop transfers, Finder copies, and other in-progress files are no longer moved while incomplete or left behind as empty duplicates. Pausing automatic watching during a transfer also keeps rules from running when it completes. Files still being copied by Finder are also skipped by Dry Run and Run Now.
+
+## [1.0.9] - 2026-10-02
 
 ### Fixed
 - About Forel now displays the app name, version, build number, copyright, and repository link.

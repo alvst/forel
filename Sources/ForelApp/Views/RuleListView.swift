@@ -54,16 +54,8 @@ struct RuleListView: View {
             }
 
             if let runNowMessage = model.runNowMessage {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text(runNowMessage)
-                }
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(ForelTheme.success)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(ForelTheme.success.opacity(0.14)))
-                .transition(.opacity.combined(with: .move(edge: .top)))
+                runNowBanner(runNowMessage)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             if model.rules.isEmpty {
@@ -109,6 +101,38 @@ struct RuleListView: View {
         model.reorderRules(ids)
     }
 
+    @ViewBuilder
+    private func runNowBanner(_ message: AppModel.RunNowMessage) -> some View {
+        let tint = message.hasFailures ? Color.orange : ForelTheme.success
+        HStack(spacing: 6) {
+            Image(systemName: message.hasFailures ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+            Text(message.text)
+            if message.hasFailures {
+                Button {
+                    model.dismissRunNowMessage()
+                    model.showActivity(forFolder: model.selectedFolderId)
+                } label: {
+                    Text("Show in Activity").underline()
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 4)
+                Button {
+                    model.dismissRunNowMessage()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .help("Dismiss")
+            }
+        }
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(tint)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(tint.opacity(0.14)))
+    }
+
     private var header: some View {
         ViewHeader(
             title: selectedFolder.map { ($0.path as NSString).lastPathComponent } ?? "Rules",
@@ -118,8 +142,7 @@ struct RuleListView: View {
             systemImage: selectedFolder == nil ? nil : "folder.fill"
         ) {
             Button {
-                model.reloadHistory()
-                model.detailRoute = .history
+                model.showActivity()
             } label: {
                 Image(systemName: "clock.arrow.circlepath")
             }
@@ -663,6 +686,13 @@ private struct PreviewSheet: View {
                                                     .font(.system(size: 10))
                                                     .foregroundStyle(ForelTheme.secondaryText)
                                             }
+                                            if let warning = action.warning {
+                                                Text(warning)
+                                                    .font(.system(size: 10))
+                                                    .foregroundStyle(.orange)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                                    .textSelection(.enabled)
+                                            }
                                         }
                                         .padding(.leading, 6)
                                     }
@@ -706,6 +736,7 @@ private extension ConditionPreview {
 
 private extension ActionPreview {
     var statusLabel: String {
+        if warning != nil { return "Likely to fail" }
         switch status {
         case .wouldRun: return "Would run"
         case .wouldSkip: return "Would skip"
@@ -715,6 +746,7 @@ private extension ActionPreview {
     }
 
     var statusIcon: String {
+        if warning != nil { return "exclamationmark.triangle.fill" }
         switch status {
         case .wouldRun: return "arrow.turn.down.right"
         case .wouldSkip: return "minus.circle"
@@ -724,6 +756,7 @@ private extension ActionPreview {
     }
 
     @MainActor var statusColor: Color {
+        if warning != nil { return .orange }
         switch status {
         case .wouldRun: return ForelTheme.accent
         case .wouldSkip: return ForelTheme.secondaryText
