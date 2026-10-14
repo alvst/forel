@@ -126,6 +126,11 @@ import Foundation
         #expect(RuleValidator.validate([invalidPause]) == [.init(message: "Pause duration must be a non-negative number of seconds")])
         #expect(RuleValidator.validate([missingScript]) == [.init(message: "Script cannot be empty")])
         #expect(RuleValidator.validate([missingWorkflow]) == [.init(message: "Automator workflow cannot be empty")])
+
+        let missingScriptFile = makeAction(.runScript, .object([ActionParam.scriptSource: .string("file")]))
+        let scriptFile = makeAction(.runScript, .object([ActionParam.scriptSource: .string("file"), ActionParam.scriptPath: .string("/tmp/script.sh")]))
+        #expect(RuleValidator.validate([missingScriptFile]) == [.init(message: "Choose a script file")])
+        #expect(RuleValidator.validate([scriptFile]).isEmpty)
     }
 
     @Test func unrelatedActionProducesNoIssues() {

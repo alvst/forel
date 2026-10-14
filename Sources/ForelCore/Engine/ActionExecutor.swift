@@ -393,10 +393,23 @@ public enum ActionExecutor {
     private static let scriptDefaultTimeout: TimeInterval = 60
 
     private static func runScript(_ action: Action, path: String) throws -> Applied {
-        let script = try stringParam(action, ActionParam.script, "RunScript")
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", script]
+        if ScriptSource.of(action) == .file {
+            // A script file also gets the matched file as $1. An executable
+            // file runs directly so its shebang (python, zsh…) is honoured.
+            let scriptPath = try scriptFilePath(action, "RunScript")
+            if FileManager.default.isExecutableFile(atPath: scriptPath) {
+                process.executableURL = URL(fileURLWithPath: scriptPath)
+                process.arguments = [path]
+            } else {
+                process.executableURL = URL(fileURLWithPath: "/bin/bash")
+                process.arguments = [scriptPath, path]
+            }
+        } else {
+            let script = try stringParam(action, ActionParam.script, "RunScript")
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = ["-c", script]
+        }
         var env = ProcessInfo.processInfo.environment
         env["FOREL_FILE"] = path
         process.environment = env
@@ -430,18 +443,39 @@ public enum ActionExecutor {
     }
 
     private static func runAppleScriptAction(_ action: Action, path: String) throws -> Applied {
+        if ScriptSource.of(action) == .file {
+            // A script file gets the matched file's full path as its first
+            // argument: `on run argv` … `item 1 of argv`.
+            try runOSA(arguments: [try scriptFilePath(action, "RunAppleScript"), path])
+            return Applied(newPath: path, undo: .none)
+        }
         let script = try stringParam(action, ActionParam.script, "RunAppleScript")
         let file = appleScriptEscapePath(path)
-        try runAppleScript("set forelFile to POSIX file \"\(file)\"\n\(script)")
+        // Same name and value as the shell script's FOREL_FILE: the full path.
+        try runAppleScript("set FOREL_FILE to \"\(file)\"\n\(script)")
         return Applied(newPath: path, undo: .none)
     }
 
     private static func runJavaScript(_ action: Action, path: String) throws -> Applied {
+        if ScriptSource.of(action) == .file {
+            // A script file gets the matched file's full path as its first
+            // argument: `function run(argv)` … `argv[0]`.
+            try runOSA(arguments: ["-l", "JavaScript", try scriptFilePath(action, "RunJavaScript"), path])
+            return Applied(newPath: path, undo: .none)
+        }
         let script = try stringParam(action, ActionParam.script, "RunJavaScript")
         let data = try JSONEncoder().encode(path)
         let literal = String(data: data, encoding: .utf8) ?? "\"\""
-        try runOSA(script: "const forelFile = Path(\(literal));\n\(script)", language: "JavaScript")
+        try runOSA(script: "const FOREL_FILE = \(literal);\n\(script)", language: "JavaScript")
         return Applied(newPath: path, undo: .none)
+    }
+
+    private static func scriptFilePath(_ action: Action, _ kind: String) throws -> String {
+        let scriptPath = try stringParam(action, ActionParam.scriptPath, kind)
+        guard FileManager.default.fileExists(atPath: scriptPath) else {
+            throw ActionError("Script file not found: \(scriptPath)")
+        }
+        return scriptPath
     }
 
     private static func runAutomatorWorkflow(_ action: Action, path: String) throws -> Applied {
@@ -627,11 +661,16 @@ public enum ActionExecutor {
 
     @discardableResult
     private static func runOSA(script: String, language: String? = nil) throws -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         var arguments: [String] = []
         if let language { arguments += ["-l", language] }
         arguments += ["-e", script]
+        return try runOSA(arguments: arguments)
+    }
+
+    @discardableResult
+    private static func runOSA(arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = arguments
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -1053,6 +1092,7 @@ public enum ActionExecutor {
                 warning: destinationWarning(destDir)
             )
         case .runAppleScript, .runJavaScript:
+            if let filePlan = scriptFilePlan(action, path: path) { return filePlan }
             let script = action.params[ActionParam.script]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return ActionPlan(kind: action.kind, description: action.kind.label, sourcePath: path, targetPath: nil, status: script.isEmpty ? .wouldSkip : .wouldRun, finalPath: path, copiedPath: nil, isTerminal: false)
         case .runAutomatorWorkflow:
@@ -1143,6 +1183,7 @@ public enum ActionExecutor {
                 isTerminal: false
             )
         case .runScript:
+            if let filePlan = scriptFilePlan(action, path: path) { return filePlan }
             let script = action.params[ActionParam.script]?.stringValue ?? ""
             let firstLine = script.split(separator: "\n").first.map(String.init)?.trimmingCharacters(in: .whitespaces) ?? ""
             return ActionPlan(
@@ -1432,6 +1473,20 @@ public enum ActionExecutor {
     /// existing ancestor. A network share that isn't mounted or that Forel
     /// isn't allowed to access shows up here as a missing folder under a
     /// location that can't be written to.
+    /// Plan for a script action that runs a script file, or nil when the
+    /// script is embedded. A missing file is flagged, as execution would fail.
+    private static func scriptFilePlan(_ action: Action, path: String) -> ActionPlan? {
+        guard ScriptSource.of(action) == .file else { return nil }
+        let scriptPath = action.params[ActionParam.scriptPath]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !scriptPath.isEmpty else {
+            return ActionPlan(kind: action.kind, description: "Skip — choose a script file", sourcePath: path, targetPath: nil, status: .wouldSkip, finalPath: path, copiedPath: nil, isTerminal: false)
+        }
+        let warning = FileManager.default.fileExists(atPath: scriptPath)
+            ? nil
+            : "The script file can't be found. It may have been moved, renamed, or deleted."
+        return ActionPlan(kind: action.kind, description: "Run \((scriptPath as NSString).lastPathComponent)", sourcePath: path, targetPath: nil, status: .wouldRun, finalPath: path, copiedPath: nil, isTerminal: false, warning: warning)
+    }
+
     private static func destinationWarning(_ destDir: String) -> String? {
         guard !destDir.isEmpty else { return nil }
         var candidate = normalizedPath(destDir)

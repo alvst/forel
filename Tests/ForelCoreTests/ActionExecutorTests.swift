@@ -22,8 +22,9 @@ import Foundation
     @Test func automationActionsExecuteScriptsAndPlanExternalWorkflows() throws {
         let dir = TempDir()
         let file = dir.file("report.txt", contents: "report")
-        let appleScript = makeAction(.runAppleScript, .object([ActionParam.script: .string("return POSIX path of forelFile")]))
-        let javaScript = makeAction(.runJavaScript, .object([ActionParam.script: .string("forelFile.toString();")]))
+        // Each script fails unless FOREL_FILE holds the matched file's full path.
+        let appleScript = makeAction(.runAppleScript, .object([ActionParam.script: .string("if FOREL_FILE is not \"\(file)\" then error \"wrong FOREL_FILE\"")]))
+        let javaScript = makeAction(.runJavaScript, .object([ActionParam.script: .string("if (FOREL_FILE !== \"\(file)\") throw new Error(\"wrong FOREL_FILE\");")]))
 
         #expect(try ActionExecutor.execute(appleScript, path: file).newPath == file)
         #expect(try ActionExecutor.execute(javaScript, path: file).newPath == file)
@@ -38,6 +39,51 @@ import Foundation
             #expect(plan.status == .wouldRun)
         }
     }
+    @Test func scriptFilesReceiveTheMatchedFile() throws {
+        let dir = TempDir()
+        let file = dir.file("report.txt", contents: "report")
+        let output = dir.path + "/output.txt"
+
+        // A plain script runs with bash; an executable one with its #! interpreter.
+        let shell = dir.file("log.sh", contents: "printf '%s|%s' \"$FOREL_FILE\" \"$1\" > \"\(output)\"")
+        let executable = dir.file("log-exec", contents: "#!/bin/zsh\nprint -rn -- \"$FOREL_FILE|$1\" > \"\(output)\"")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable)
+        for scriptPath in [shell, executable] {
+            try? FileManager.default.removeItem(atPath: output)
+            let action = makeAction(.runScript, .object([ActionParam.scriptSource: .string("file"), ActionParam.scriptPath: .string(scriptPath)]))
+            _ = try ActionExecutor.execute(action, path: file)
+            #expect(try String(contentsOfFile: output, encoding: .utf8) == "\(file)|\(file)")
+        }
+
+        // AppleScript and JavaScript files get the path as their first argument.
+        let appleScript = dir.file("check.applescript", contents: "on run argv\nif item 1 of argv is not \"\(file)\" then error \"wrong file\"\nend run")
+        let javaScript = dir.file("check.js", contents: "function run(argv) { if (argv[0] !== \"\(file)\") throw new Error(\"wrong file\"); }")
+        _ = try ActionExecutor.execute(makeAction(.runAppleScript, .object([ActionParam.scriptSource: .string("file"), ActionParam.scriptPath: .string(appleScript)])), path: file)
+        _ = try ActionExecutor.execute(makeAction(.runJavaScript, .object([ActionParam.scriptSource: .string("file"), ActionParam.scriptPath: .string(javaScript)])), path: file)
+    }
+
+    @Test(arguments: [ActionKind.runScript, .runAppleScript, .runJavaScript])
+    func scriptFilePlanFlagsMissingOrUnsetFiles(kind: ActionKind) throws {
+        let dir = TempDir()
+        let file = dir.file("report.txt", contents: "report")
+        let script = dir.file("script.txt", contents: "")
+        func action(_ scriptPath: String) -> Action {
+            makeAction(kind, .object([ActionParam.scriptSource: .string("file"), ActionParam.scriptPath: .string(scriptPath)]))
+        }
+
+        let existing = try ActionExecutor.plan(action(script), path: file)
+        #expect(existing.status == .wouldRun)
+        #expect(existing.description == "Run script.txt")
+        #expect(existing.warning == nil)
+
+        let missing = try ActionExecutor.plan(action(dir.path + "/gone.txt"), path: file)
+        #expect(missing.status == .wouldRun)
+        #expect(missing.warning != nil)
+        #expect(throws: (any Error).self) { try ActionExecutor.execute(action(dir.path + "/gone.txt"), path: file) }
+
+        #expect(try ActionExecutor.plan(action(""), path: file).status == .wouldSkip)
+    }
+
     @Test func addAndRemoveTagUpdatesFinderTagXattrWithoutDuplicates() throws {
         let dir = TempDir()
         let file = dir.file("document.txt", contents: "hello")

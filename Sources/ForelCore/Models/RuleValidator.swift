@@ -62,7 +62,11 @@ public enum RuleValidator {
                     return Issue(message: "Pause duration must be a non-negative number of seconds")
                 }
             case .runAppleScript, .runJavaScript, .runScript:
-                if action.params[ActionParam.script]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                if ScriptSource.of(action) == .file {
+                    if action.params[ActionParam.scriptPath]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
+                        return Issue(message: "Choose a script file")
+                    }
+                } else if action.params[ActionParam.script]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
                     return Issue(message: "Script cannot be empty")
                 }
             case .runAutomatorWorkflow:

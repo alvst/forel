@@ -198,6 +198,8 @@ public enum ActionParam {
     public static let tags = "tags"
     public static let color = "color"
     public static let script = "script"
+    public static let scriptSource = "script_source"
+    public static let scriptPath = "script_path"
     public static let shortcutName = "shortcut_name"
     public static let shortcutInputMode = "shortcut_input_mode"
     public static let applicationPath = "application_path"
@@ -209,6 +211,17 @@ public enum ActionParam {
     public static let workflowPath = "workflow_path"
     public static let notificationTitle = "notification_title"
     public static let notificationBody = "notification_body"
+}
+
+/// Where a script action's code comes from: typed into Forel, or a script
+/// file on disk. Rules without the param keep their embedded script.
+public enum ScriptSource: String, Sendable {
+    case embedded
+    case file
+
+    public static func of(_ action: Action) -> ScriptSource {
+        ScriptSource(rawValue: action.params[ActionParam.scriptSource]?.stringValue ?? "") ?? .embedded
+    }
 }
 
 /// The abstract shape of an action parameter; the UI maps it to a concrete editor.
@@ -311,7 +324,8 @@ public extension ActionKind {
         case .setColorLabel:
             return [ActionParamSpec(key: ActionParam.color, kind: .colorLabel)]
         case .runScript, .runAppleScript, .runJavaScript:
-            return [ActionParamSpec(key: ActionParam.script, kind: .script)]
+            return [ActionParamSpec(key: ActionParam.script, kind: .script),
+                    ActionParamSpec(key: ActionParam.scriptPath, kind: .filePath)]
         case .runAutomatorWorkflow:
             return [ActionParamSpec(key: ActionParam.workflowPath, kind: .filePath)]
         case .runShortcut:

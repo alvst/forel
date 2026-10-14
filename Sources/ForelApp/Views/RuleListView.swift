@@ -488,6 +488,13 @@ private struct RuleDetails: View {
         .padding(.vertical, 2)
     }
 
+    /// The script file a script action runs, or nil when its script is embedded.
+    private func scriptFile(_ action: Action) -> String? {
+        guard ScriptSource.of(action) == .file else { return nil }
+        let path = action.params[ActionParam.scriptPath]?.stringValue ?? ""
+        return path.isEmpty ? nil : path
+    }
+
     private func actionSummary(_ action: Action) -> (title: String, detail: String?) {
         switch action.kind {
         case .moveToFolder:
@@ -508,6 +515,7 @@ private struct RuleDetails: View {
             let color = action.params[ActionParam.color]?.stringValue ?? ""
             return (color.isEmpty ? "clear color label" : "set to \(color)", nil)
         case .runScript:
+            if let file = scriptFile(action) { return ((file as NSString).lastPathComponent, file) }
             let script = action.params[ActionParam.script]?.stringValue ?? ""
             let firstLine = script.split(separator: "\n").first.map(String.init) ?? ""
             return (firstLine.isEmpty ? "run script" : firstLine, nil)
@@ -515,6 +523,7 @@ private struct RuleDetails: View {
             let name = action.params[ActionParam.shortcutName]?.stringValue ?? ""
             return (name.isEmpty ? "run shortcut" : name, ActionExecutor.shortcutInputMode(action).label)
         case .runAppleScript, .runJavaScript:
+            if let file = scriptFile(action) { return ((file as NSString).lastPathComponent, file) }
             let script = action.params[ActionParam.script]?.stringValue ?? ""
             let firstLine = script.split(separator: "\n").first.map(String.init) ?? ""
             return (firstLine.isEmpty ? action.kind.label : firstLine, nil)
