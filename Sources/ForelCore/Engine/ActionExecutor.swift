@@ -446,13 +446,13 @@ public enum ActionExecutor {
         if ScriptSource.of(action) == .file {
             // A script file gets the matched file's full path as its first
             // argument: `on run argv` … `item 1 of argv`.
-            try runOSA(arguments: [try scriptFilePath(action, "RunAppleScript"), path])
+            try runOSA(arguments: [try scriptFilePath(action, "RunAppleScript"), path], timeout: scriptDefaultTimeout)
             return Applied(newPath: path, undo: .none)
         }
         let script = try stringParam(action, ActionParam.script, "RunAppleScript")
         let file = appleScriptEscapePath(path)
         // Same name and value as the shell script's FOREL_FILE: the full path.
-        try runAppleScript("set FOREL_FILE to \"\(file)\"\n\(script)")
+        try runOSA(script: "set FOREL_FILE to \"\(file)\"\n\(script)", timeout: scriptDefaultTimeout)
         return Applied(newPath: path, undo: .none)
     }
 
@@ -460,13 +460,13 @@ public enum ActionExecutor {
         if ScriptSource.of(action) == .file {
             // A script file gets the matched file's full path as its first
             // argument: `function run(argv)` … `argv[0]`.
-            try runOSA(arguments: ["-l", "JavaScript", try scriptFilePath(action, "RunJavaScript"), path])
+            try runOSA(arguments: ["-l", "JavaScript", try scriptFilePath(action, "RunJavaScript"), path], timeout: scriptDefaultTimeout)
             return Applied(newPath: path, undo: .none)
         }
         let script = try stringParam(action, ActionParam.script, "RunJavaScript")
         let data = try JSONEncoder().encode(path)
         let literal = String(data: data, encoding: .utf8) ?? "\"\""
-        try runOSA(script: "const FOREL_FILE = \(literal);\n\(script)", language: "JavaScript")
+        try runOSA(script: "const FOREL_FILE = \(literal);\n\(script)", language: "JavaScript", timeout: scriptDefaultTimeout)
         return Applied(newPath: path, undo: .none)
     }
 
@@ -483,15 +483,9 @@ public enum ActionExecutor {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/automator")
         process.arguments = ["-i", path, workflow]
-        let errors = Pipe()
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = errors
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Automator workflow failed"
-            throw ActionError(message)
+        let result = try runCapturingOutput(process, timeout: scriptDefaultTimeout)
+        guard result.status == 0 else {
+            throw ActionError(result.errors.isEmpty ? "Automator workflow failed" : result.errors)
         }
         return Applied(newPath: path, undo: .none)
     }
@@ -660,31 +654,70 @@ public enum ActionExecutor {
     }
 
     @discardableResult
-    private static func runOSA(script: String, language: String? = nil) throws -> String {
+    private static func runOSA(script: String, language: String? = nil, timeout: TimeInterval? = nil) throws -> String {
         var arguments: [String] = []
         if let language { arguments += ["-l", language] }
         arguments += ["-e", script]
-        return try runOSA(arguments: arguments)
+        return try runOSA(arguments: arguments, timeout: timeout)
     }
 
     @discardableResult
-    private static func runOSA(arguments: [String]) throws -> String {
+    private static func runOSA(arguments: [String], timeout: TimeInterval? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = arguments
+        let result = try runCapturingOutput(process, timeout: timeout)
+        guard result.status == 0 else {
+            throw ActionError("AppleScript failed: \(result.errors)")
+        }
+        return result.output
+    }
+
+    /// Runs `process` while reading its output and errors as they come: a
+    /// process that fills an unread pipe (~64 KB) blocks forever, and with
+    /// it every file waiting to be processed. With a `timeout`, a process
+    /// still running after it is stopped and reported as timed out.
+    private static func runCapturingOutput(_ process: Process, timeout: TimeInterval? = nil) throws -> (status: Int32, output: String, errors: String) {
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         process.standardOutput = outputPipe
         process.standardError = errorPipe
         try process.run()
-        process.waitUntilExit()
-        let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-        let errorMsg = String(data: errorData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard process.terminationStatus == 0 else {
-            throw ActionError("AppleScript failed: \(errorMsg)")
+        let output = PipeReader(outputPipe)
+        let errors = PipeReader(errorPipe)
+
+        if let timeout {
+            let startTime = Date()
+            while process.isRunning && Date().timeIntervalSince(startTime) < timeout {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            if process.isRunning {
+                process.terminate()
+                throw ActionError("script timed out after \(Int(timeout))s")
+            }
         }
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        process.waitUntilExit()
+        return (process.terminationStatus, output.text(), errors.text())
+    }
+
+    /// Reads a pipe to its end on a background thread.
+    private final class PipeReader: @unchecked Sendable {
+        private var data = Data()
+        private let done = DispatchSemaphore(value: 0)
+
+        init(_ pipe: Pipe) {
+            let handle = pipe.fileHandleForReading
+            DispatchQueue.global(qos: .utility).async {
+                self.data = handle.readDataToEndOfFile()
+                self.done.signal()
+            }
+        }
+
+        /// Waits for the pipe to close, then returns what was read, trimmed.
+        func text() -> String {
+            done.wait()
+            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
     }
 
     static func appleScriptEscapePath(_ path: String) -> String {
